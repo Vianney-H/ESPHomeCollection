@@ -1,0 +1,31 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ESPHome: Validate Config",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\esphome.exe",
+      "args": [
+        "config",
+        "${workspaceFolder}\\esp32_lab.yaml"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "ESPHome: Compile Firmware",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\esphome.exe",
+      "args": [
+        "compile",
+        "${workspaceFolder}\\esp32_lab.yaml"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
