@@ -1,0 +1,278 @@
+substitutions:
+  name: "esp32s3-touch-display"
+  friendly_name: "Écran ES3C28P"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    priority: -100
+    then:
+      - delay: 3s
+      - component.update: cam_jardin_img
+
+packages:
+  board: github://fortuna/ESPHomeCollection/boards/hosyond-es3c28p/board.yaml@main
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+ota:
+  - platform: esphome
+
+logger:
+  hardware_uart: USB_CDC
+
+# Surcharge de la fréquence du microphone pour voice_assistant
+microphone:
+  - id: !extend main_microphone
+    sample_rate: 16000
+
+# Haut-parleur exposé à Home Assistant
+media_player:
+  - platform: speaker
+    name: "Haut-parleur"
+    id: es3c28p_media_player
+    announcement_pipeline:
+      speaker: main_speaker
+
+# Gestion du tactile plein écran (Portrait 240x320) et réveil de l'écran
+binary_sensor:
+  - platform: touchscreen
+    id: touch_sensor
+    name: "Écran Touché"
+    touchscreen_id: main_touchscreen
+    x_min: 0
+    x_max: 240
+    y_min: 0
+    y_max: 320
+    on_press:
+      - light.turn_on:
+          id: display_backlight_light
+          brightness: 80%
+      - script.execute: screen_dim_timer
+
+script:
+  - id: screen_dim_timer
+    mode: restart
+    then:
+      - delay: 30s
+      - light.turn_off: display_backlight_light
+
+time:
+  - platform: homeassistant
+    id: ha_time
+
+sensor:
+  - platform: wifi_signal
+    name: "Signal Wi-Fi"
+    update_interval: 60s
+  - platform: uptime
+    name: "Temps d'activité"
+  - platform: homeassistant
+    id: temp_salon
+    entity_id: sensor.temperature_salon
+
+button:
+  - platform: restart
+    name: "Redémarrer Écran"
+
+# Assistant vocal
+voice_assistant:
+  microphone:
+    - microphone: main_microphone
+  speaker: main_speaker
+  on_listening:
+    - logger.log: "En écoute..."
+  on_tts_start:
+    - logger.log: "Parle..."
+  on_end:
+    - logger.log: "Prêt"
+
+# Requis pour les requêtes HTTP
+
+# Requis pour les requêtes HTTP
+http_request:
+  id: ha_http_request
+  timeout: 5s
+
+# Variable mémorisant la caméra affichée (1=Jardin, 2=Mangeoire, 3=Hérisson)
+globals:
+  - id: active_camera
+    type: int
+    restore_value: no
+    initial_value: '1'
+
+# Inversion matérielle des couleurs sur le pilote LCD
+display:
+  - id: !extend main_display
+    invert_colors: true
+
+# Récupération et redimensionnement natif en portrait (240x135) depuis Frigate
+image:
+  - platform: online_image
+    id: cam_jardin_img
+    url: "http://192.168.1.193:5000/api/jardin/latest.jpg"
+    format: JPEG
+    type: RGB565
+    resize: 240x135
+    update_interval: never
+    on_download_finished:
+      - lvgl.image.update:
+          id: img_jardin
+          src: cam_jardin_img
+
+  - platform: online_image
+    id: cam_mangeoire_img
+    url: "http://192.168.1.193:5000/api/mangeoire/latest.jpg"
+    format: JPEG
+    type: RGB565
+    resize: 240x135
+    update_interval: never
+    on_download_finished:
+      - lvgl.image.update:
+          id: img_mangeoire
+          src: cam_mangeoire_img
+
+  - platform: online_image
+    id: cam_herisson_img
+    url: "http://192.168.1.193:5000/api/herisson/latest.jpg"
+    format: JPEG
+    type: RGB565
+    resize: 240x135
+    update_interval: never
+    on_download_finished:
+      - lvgl.image.update:
+          id: img_herisson
+          src: cam_herisson_img
+
+# Rafraîchissement automatique toutes les 4s de la caméra sélectionnée
+interval:
+  - interval: 4s
+    then:
+      - lambda: |-
+          if (id(active_camera) == 1) {
+            id(cam_jardin_img).update();
+          } else if (id(active_camera) == 2) {
+            id(cam_mangeoire_img).update();
+          } else if (id(active_camera) == 3) {
+            id(cam_herisson_img).update();
+          }
+
+# Interface LVGL Portrait (240x320)
+lvgl:
+  displays:
+    - main_display
+  touchscreens:
+    - main_touchscreen
+
+  style_definitions:
+    - id: style_btn_idle
+      bg_color: 0x1E293B
+      text_color: 0x94A3B8
+      radius: 6
+      pad_all: 2
+    - id: style_btn_active
+      bg_color: 0x2563EB
+      text_color: 0xFFFFFF
+      radius: 6
+      pad_all: 2
+
+  widgets:
+    - obj:
+        id: screen_cameras
+        x: 0
+        y: 0
+        width: 100%
+        height: 100%
+        bg_color: 0x0F172A
+        widgets:
+          # --- 3 BOUTONS RÉPARTIS SUR 240 PX DE LARGE ---
+          - button:
+              id: btn_c1
+              x: 6
+              y: 6
+              width: 72
+              height: 36
+              styles: style_btn_active
+              widgets:
+                - label: { text: "Jardin", align: CENTER }
+              on_click:
+                - globals.set: { id: active_camera, value: '1' }
+                - component.update: cam_jardin_img
+                - lvgl.widget.show: img_jardin
+                - lvgl.widget.hide: img_mangeoire
+                - lvgl.widget.hide: img_herisson
+                - lvgl.widget.update: { id: btn_c1, styles: style_btn_active }
+                - lvgl.widget.update: { id: btn_c2, styles: style_btn_idle }
+                - lvgl.widget.update: { id: btn_c3, styles: style_btn_idle }
+
+          - button:
+              id: btn_c2
+              x: 84
+              y: 6
+              width: 72
+              height: 36
+              styles: style_btn_idle
+              widgets:
+                - label: { text: "Oiseaux", align: CENTER }
+              on_click:
+                - globals.set: { id: active_camera, value: '2' }
+                - component.update: cam_mangeoire_img
+                - lvgl.widget.hide: img_jardin
+                - lvgl.widget.show: img_mangeoire
+                - lvgl.widget.hide: img_herisson
+                - lvgl.widget.update: { id: btn_c1, styles: style_btn_idle }
+                - lvgl.widget.update: { id: btn_c2, styles: style_btn_active }
+                - lvgl.widget.update: { id: btn_c3, styles: style_btn_idle }
+
+          - button:
+              id: btn_c3
+              x: 162
+              y: 6
+              width: 72
+              height: 36
+              styles: style_btn_idle
+              widgets:
+                - label: { text: "Herisson", align: CENTER }
+              on_click:
+                - globals.set: { id: active_camera, value: '3' }
+                - component.update: cam_herisson_img
+                - lvgl.widget.hide: img_jardin
+                - lvgl.widget.hide: img_mangeoire
+                - lvgl.widget.show: img_herisson
+                - lvgl.widget.update: { id: btn_c1, styles: style_btn_idle }
+                - lvgl.widget.update: { id: btn_c2, styles: style_btn_idle }
+                - lvgl.widget.update: { id: btn_c3, styles: style_btn_active }
+
+          # --- ZONE D'AFFICHAGE VIDÉO (240x135 px) ---
+          - image:
+              id: img_jardin
+              x: 0
+              y: 48
+              width: 240
+              height: 135
+              src: cam_jardin_img
+
+          - image:
+              id: img_mangeoire
+              x: 0
+              y: 48
+              width: 240
+              height: 135
+              src: cam_mangeoire_img
+              hidden: true
+
+          - image:
+              id: img_herisson
+              x: 0
+              y: 48
+              width: 240
+              height: 135
+              src: cam_herisson_img
+              hidden: true
